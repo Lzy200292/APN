@@ -1,0 +1,56 @@
+// Import regional boundary data
+var china = ee.FeatureCollection("projects/innate-summit-494713-a9/assets/CH-city");
+var region = china.geometry();
+var startDate = '1980-01-01';
+var endDate = '1981-01-01';
+
+// Define your points of interest (Example: Fengxian station, Shanghai)
+var points = [
+  ee.Geometry.Point([121.4956,30.8872]), // 
+];
+
+// Create a feature collection
+var pointsCollection = ee.FeatureCollection(points.map(function(point, index) {
+  return ee.Feature(point, {
+    'point_id': ee.String('point_').cat(ee.Number(index).format('%02d')),
+    'longitude': point.coordinates().get(0),
+    'latitude': point.coordinates().get(1)
+  });
+}));
+
+// Get ERA5 data
+var era5 = ee.ImageCollection("ECMWF/ERA5/HOURLY")
+            .select(['temperature_2m'])
+            .filterBounds(region)
+            .filterDate(startDate, endDate);
+
+
+// Extract data for all points at each time step
+var extractData = era5.map(function(image) {
+  var date = ee.Date(image.get('system:time_start'));
+  
+  // Extract values for all points at the current time
+  var values = image.reduceRegions({
+    collection: pointsCollection,
+    reducer: ee.Reducer.first(),
+    scale: 27830
+  });
+  
+  // Add Beijing time (UTC+8) information to each feature
+  return values.map(function(feature) {
+    return feature.set({
+        'datetime_bj': date.format('YYYY-MM-dd HH:mm:ss', 'Asia/Shanghai'),
+      'date_bj': date.format('YYYY-MM-dd', 'Asia/Shanghai'),
+      'hour_bj': date.format('HH', 'Asia/Shanghai'),
+      'timestamp': image.get('system:time_start') 
+    });
+  });
+}).flatten();
+
+
+// Export to CSV
+Export.table.toDrive({
+  collection: extractData,
+  description: 'shanghai',
+  fileFormat: 'CSV'
+});
